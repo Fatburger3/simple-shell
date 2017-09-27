@@ -23,7 +23,7 @@
 #define ANSI_COLOR_RESET   "\x1b[0m"
 
 // This flag enables colored error messages and also colors the "msh>" prompt green.
-// It is disabled by default in case this breaks functionality or gradability.  
+// It is disabled by default in case this breaks functionality or gradability.
 #define ENABLE_ANSI_COLORS 1
 
 #define delim " \t"
@@ -54,10 +54,18 @@ void printfc(char* color, char* message, ...)
 		printf("%s", ANSI_COLOR_RESET);
 	}
 }
+
+// Formatted error message. Maybe I should just print to standard error?
 void printe(char*message)
 {
 	printfc(ANSI_COLOR_RED, "Error: %s\n", message);
 }
+
+void printd(char*message)
+{
+	printfc(ANSI_COLOR_CYAN, "Debug: %s\n", message);
+}
+
 int main(int argc, char** argv)
 {
 	int stdin_mode = 1;
@@ -85,6 +93,7 @@ int main(int argc, char** argv)
 
 	char input[LENGTH];
 	// Loop unconditionally
+	start:
 	while(1)
 	{
 		// Print the shell prompt
@@ -111,14 +120,58 @@ int main(int argc, char** argv)
 			// when the user presses enter without entering text
 			continue;
 		}
-		// Remove this pesky newline char
-		char* string = strtok(input, "\n");
+
+		char* no_endl = strtok(input, "\n");
+
+		// Now check for redirection
+		int sub_in  = 0;
+		int sub_out = 0;
+		char* sub_out_file;
+		char* sub_in_file;
+
+		char* redir_delims = "><";
+		char* c = malloc(sizeof(char) * strlen(no_endl));
+		strcpy(c, no_endl);
+		char* command = strtok(no_endl, redir_delims);
+
+		// Scan for redirection chars
+		while(*c)
+		{
+			if(*c == '>')
+			{
+
+				if(sub_out != 0)
+				{
+					printe("Only one '>' is allowed");
+					goto start;
+				}
+				// We have determined there is output redirection, so open the output file
+				sub_out_file = strtok(NULL, redir_delims);
+				sub_out++;
+
+			}
+			else if(*c == '<')
+			{
+
+				if(sub_in != 0)
+				{
+					printe("Only one '<' is allowed");
+					goto start;
+				}
+				// We have determined there is input redirection, so open the input file
+				sub_in_file = strtok(NULL, redir_delims);
+				sub_in++;
+			}
+			c++;
+		}
+
 
 		char* tokens[LENGTH];
-		int i = 0, t;
+		int t;
+		int i = 0;
 
 		// grab the first token in input string
-		tokens[i] = strtok(string, delim);
+		tokens[i] = strtok(command, delim);
 
 		// Grab the rest of the tokens
 		while(tokens[i] != NULL)
@@ -193,61 +246,14 @@ int main(int argc, char** argv)
 			}
 			else if(fv == 0) // valid child process
 			{
-				// Right here we are going to determine if we need to use dup2 or not
-				i = 0;
-				// c tells us where to chop off the args when passing them to execvp
-				int c = 0;
-				// Look for redirection tokens
-				while(args[i] != NULL)
+				// Redirection
+				if(sub_in)
 				{
-					if(strcmp(args[i], "<") == 0)
-					{
-						// Determine if this token is in a valid location
-						if(i==0 || args[i+1] == NULL)
-						{
-							printe("Unexpected '<'");
-							exit(1);
-						}
-						else
-						{
-							if(c == 0)
-							{// Mark the end of command args
-								c = i;
-							}
-							// redirect this processes input to file
-							int in = open(args[++i], O_RDONLY);
-							dup2(in, 0);
-						}
-					}
-					else if(strcmp(args[i], ">") == 0)
-					{
-						// Determine if this token is in a valid location
-						if(i==0 || args[i+1] == NULL)
-						{
-							printe("Unexpected '>'");
-							exit(1);
-						}
-						else
-						{
-							if(c == 0)
-							{// Mark the end of command args
-								c = i;
-							}
-							// redirect this processes output to file
-							int out = open(args[++i], O_WRONLY | O_TRUNC | O_CREAT, S_IRUSR | S_IRGRP | S_IWGRP | S_IWUSR);
-							dup2(out, 1);
-						}
-					}
-					else if(c > 0)
-					{
-						printe("Unexpected token after redirection");
-					}
-					i++;
+					dup2(open(strtok(sub_in_file, delim), O_RDONLY), 0);
 				}
-				// if c was set, then we clamp off the args at index c
-				if(c > 0)
+				if(sub_out)
 				{
-					args[c] = NULL;
+					dup2(open(strtok(sub_out_file, delim), O_WRONLY | O_TRUNC | O_CREAT, S_IRUSR | S_IRGRP | S_IWGRP | S_IWUSR), 1);
 				}
 				if(0 > execvp(args[0], args))
 				{
