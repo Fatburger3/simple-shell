@@ -23,7 +23,6 @@
 #define ANSI_COLOR_RESET   "\x1b[0m"
 
 // This flag enables colored error messages and also colors the "msh>" prompt green.
-// It is disabled by default in case this breaks functionality or gradability.
 #define ENABLE_ANSI_COLORS 1
 
 #define delim " \t"
