@@ -10,6 +10,7 @@
 #include <sys/wait.h>
 #include <time.h>
 #include <stdarg.h>
+#include <fcntl.h>
 
 // mmmmm these are fun to use
 // I get bored easily
@@ -23,7 +24,7 @@
 
 // This flag enables colored error messages and also colors the "msh>" prompt green.
 // It is disabled by default in case this breaks functionality or gradability.  
-#define ENABLE_ANSI_COLORS 0
+#define ENABLE_ANSI_COLORS 1
 
 #define delim " \t"
 
@@ -43,7 +44,7 @@ void printfc(char* color, char* message, ...)
 	va_list args;
 	va_start(args, message);
 
- 	vprintf(message, args);
+	vprintf(message, args);
 
 	va_end(args);
 
@@ -53,7 +54,10 @@ void printfc(char* color, char* message, ...)
 		printf("%s", ANSI_COLOR_RESET);
 	}
 }
-
+void printe(char*message)
+{
+	printfc(ANSI_COLOR_RED, "Error: %s\n", message);
+}
 int main(int argc, char** argv)
 {
 	int stdin_mode = 1;
@@ -62,7 +66,7 @@ int main(int argc, char** argv)
 	switch(argc)
 	{
 		case 0:
-			printfc(ANSI_COLOR_RED, "%s\n", "No input args, this is impossible!");
+			printe("No input args, this is impossible!");
 			return 1;
 		case 1:
 			// The only arg is the program name, so we read from sdtin
@@ -75,7 +79,7 @@ int main(int argc, char** argv)
 			stdin_mode = 0;
 			break;
 		default:
-			printfc(ANSI_COLOR_RED, "%s\n", "Too many input args!");
+			printe("Too many input args!");
 			return 1;
 	}
 
@@ -144,7 +148,7 @@ int main(int argc, char** argv)
 			char *ptr;
 			long size = pathconf(".", _PC_PATH_MAX);
 			if ((buf = (char *)malloc((size_t)size)) != NULL)
-			    ptr = getcwd(buf, (size_t)size);
+				ptr = getcwd(buf, (size_t)size);
 			printfc(ANSI_COLOR_YELLOW, "%s\n", ptr);
 			continue;
 		}
@@ -157,7 +161,7 @@ int main(int argc, char** argv)
 			// Change directory, then return to input prompt
 			if(chdir(args[1]) != 0)
 			{
-				printfc(ANSI_COLOR_RED, "%s\n", "Could not change directory");
+				printe("Could not change directory");
 			}
 			continue;
 		}
@@ -185,21 +189,77 @@ int main(int argc, char** argv)
 			if(fv < 0)
 			{
 				// There was an error creating the process
-				printfc(ANSI_COLOR_RED, "%s\n", "Error creating new process. (fork)");
+				printe("Unable to start process. (fork)");
 			}
 			else if(fv == 0) // valid child process
 			{
+				// Right here we are going to determine if we need to use dup2 or not
+				i = 0;
+				// c tells us where to chop off the args when passing them to execvp
+				int c = 0;
+				// Look for redirection tokens
+				while(args[i] != NULL)
+				{
+					if(strcmp(args[i], "<") == 0)
+					{
+						// Determine if this token is in a valid location
+						if(i==0 || args[i+1] == NULL)
+						{
+							printe("Unexpected '<'");
+							exit(1);
+						}
+						else
+						{
+							if(c == 0)
+							{// Mark the end of command args
+								c = i;
+							}
+							// redirect this processes input to file
+							int in = open(args[++i], O_RDONLY);
+							dup2(in, 0);
+						}
+					}
+					else if(strcmp(args[i], ">") == 0)
+					{
+						// Determine if this token is in a valid location
+						if(i==0 || args[i+1] == NULL)
+						{
+							printe("Unexpected '>'");
+							exit(1);
+						}
+						else
+						{
+							if(c == 0)
+							{// Mark the end of command args
+								c = i;
+							}
+							// redirect this processes output to file
+							int out = open(args[++i], O_WRONLY | O_TRUNC | O_CREAT, S_IRUSR | S_IRGRP | S_IWGRP | S_IWUSR);
+							dup2(out, 1);
+						}
+					}
+					else if(c > 0)
+					{
+						printe("Unexpected token after redirection");
+					}
+					i++;
+				}
+				// if c was set, then we clamp off the args at index c
+				if(c > 0)
+				{
+					args[c] = NULL;
+				}
 				if(0 > execvp(args[0], args))
 				{
 					// The process was not started.
 					// This process is now a clone of the original msh process,
 					// So here we print an error and then exit,
 					// allowing the parent process to take over again
-					printfc(ANSI_COLOR_RED, "%s\n", "Error starting new process. (execvp)");
+					printe("Unable to start process. (execvp)");
 					return 1;
 				}
 			}
-			wait(NULL);	
+			wait(NULL);
 		}
 	}
 }
